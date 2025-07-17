@@ -82,8 +82,8 @@ class Controller {
     let query = `
       create table if not exists prizes(
         Event_Name text not null,
-        Prize_Type_Info text not null,
         Coupon_Number integer not null,
+        Prize_Type_Info text not null,
         run_usr_id text not null,
         run_dt text not null
       );
@@ -118,17 +118,46 @@ class Controller {
     }
   }
 
+  checkIfAlreadyRegistered(userName) {
+    try {
+      let query = this.database.prepare(
+        `select * from registeredUsers where user_name = ?;`,
+      );
+      let result = query.all(userName.toString().trim());
+      if (result.length > 0) return { success: true, userID: result[0].userID };
+      else return { success: false };
+    } catch (err) {
+      console.log(err);
+      return { success: false };
+    }
+  }
+  deleteRegisteredUserName(userName) {
+    try {
+      let query = this.database.prepare(
+        `delete from registeredUsers where user_name = ?;`,
+      );
+      query.run(userName);
+    } catch (err) {
+      console.log(err);
+    }
+  }
   insertUser({ userName, hash }) {
     try {
+      let result = this.checkIfAlreadyRegistered(userName);
+      let userID = "";
+      if (result.success) {
+        this.deleteRegisteredUserName(userName.toString().trim());
+        userID = result.userID;
+      } else {
+        let totalCount = this.database
+          .prepare(`select count(*) as count from registeredUsers;`)
+          .get().count;
+        userID = "IIPL-" + (totalCount + 1).toString().padStart(4, "0");
+      }
       let query = this.database.prepare(`
       insert into registeredUsers (userID,user_name,password) values(?,?,?);
     `);
-      let totalCount =
-        this.database
-          .prepare("select count(*) as count from registeredUsers;")
-          .get().count + 1;
-      let userID = "IIPL-" + totalCount.toString().padStart(4, "0");
-      query.run(userID, userName, hash);
+      query.run(userID, userName.toString().trim(), hash);
       return { success: true, id: userID };
     } catch (err) {
       console.log(err);
@@ -227,9 +256,9 @@ class Controller {
     try {
       let timestamp = this.formatDateTime(new Date());
       let query = this.database.prepare(`
-        insert into prizes (Event_Name,Prize_Type_Info,Coupon_Number, run_usr_id, run_dt) values (?,?,?,?,?);
+        insert into prizes (Event_Name,Coupon_Number,Prize_Type_Info, run_usr_id, run_dt) values (?,?,?,?,?);
       `);
-      query.run(eventName, prizeInfo, couponNumber, loggedInUserID, timestamp);
+      query.run(eventName, couponNumber, prizeInfo, loggedInUserID, timestamp);
       return { success: true };
     } catch (err) {
       console.log(err);
@@ -316,13 +345,16 @@ class Controller {
       return { success: false, error: err.message };
     }
   }
-  getActivityLog(userID) {
+  getDrawRunLog(loggedInUserInfo) {
     let resultSet = new Set();
     try {
       let query = this.database.prepare(
-        `select * from activity_log where usr_id = ?;`,
+        `select Event_Name,run_usr_id,? as User_Name,run_dt from prizes where run_usr_id = ? group by Event_Name order by run_dt;`,
       );
-      let result = query.all(userID);
+      let result = query.all(
+        loggedInUserInfo.user_name,
+        loggedInUserInfo.userID,
+      );
       result.forEach((event) => {
         resultSet.add(event);
       });

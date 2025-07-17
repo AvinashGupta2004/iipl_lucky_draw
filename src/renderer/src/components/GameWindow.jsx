@@ -1,4 +1,3 @@
-import { IoClose, IoSettingsSharp } from "react-icons/io5";
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { MdMinimize } from "react-icons/md";
@@ -15,16 +14,40 @@ function GameWindow() {
   const [isConsolationFilled, setIsConsolationFilled] = useState(false);
   const [box, setBox] = useState([]);
   const [rollingNumber, setRollingNumber] = useState(["1", "2", "5", "4", "7"]);
-  const [isGameRunning, setIsGameRunning] = useState(false);
   const [isNumberGenerated, setIsNumberGenerated] = useState(true);
   const [lines, setLines] = useState([]);
   const navigate = useNavigate();
+  const screenSizes = {
+    840: 6,
+    1024: 8,
+    1900:10,
+  };
 
-  function randomDigit() {
-    return Math.floor(Math.random() * 10).toString();
+  function getNumberOfBoxes(screenWidth) {
+    const sortedKeys = Object.keys(screenSizes)
+      .map(Number)
+      .sort((a, b) => a - b);
+
+    let numBoxes = null;
+    for (const key of sortedKeys) {
+      if (screenWidth <= key) {
+        numBoxes = screenSizes[key];
+        break;
+      }
+    }
+    if (numBoxes === null) {
+      numBoxes = screenSizes[sortedKeys[sortedKeys.length - 1]];
+    }
+    return numBoxes;
   }
-  function handleClose() {
-    window.api.appClose().then();
+
+  function randomNumber() {
+    return Math.floor(
+      Math.random() * (requirements.max_range - requirements.min_range + 1),
+    ).toString();
+  }
+  function handleLogout() {
+    navigate("/sign-in");
   }
   function handleMinimize() {
     window.api.appMinimize().then();
@@ -70,7 +93,7 @@ function GameWindow() {
           {type === "main-prize" ? title : ""}
         </h4>
         <div
-          className={`h-10 w-27 font-work font-bold text-[1.4rem] tracking-wider ${states[type].textColor} rounded-md flex flex-col justify-center items-center border-1 ${states[type].borderColor} ${states[type].backgroundColor}`}
+          className={`h-10 min-w-27 font-work font-bold text-[1.4rem] tracking-wider ${states[type].textColor} rounded-md flex flex-col justify-center items-center border-1 ${states[type].borderColor} ${states[type].backgroundColor}`}
         >
           {value}
         </div>
@@ -83,13 +106,19 @@ function GameWindow() {
       let rolls = 0;
       let interval = setInterval(() => {
         if (rolls < 50) {
-          rollingNumber.map((_, index) => {
-            setRollingNumber((prev) => {
-              const newArray = [...prev];
-              newArray[index] = randomDigit();
-              return newArray;
-            });
-          });
+          let new_rolled_number_array = [
+            ...randomNumber()
+              .toString()
+              .padStart(requirements.total_digits, "0"),
+          ];
+          // rollingNumber.map((_, index) => {
+          //   setRollingNumber((prev) => {
+          //     const newArray = [...prev];
+          //     newArray =
+          //     return newArray;
+          //   });
+          // });
+          setRollingNumber(new_rolled_number_array);
           rolls++;
         } else {
           clearInterval(interval);
@@ -106,10 +135,8 @@ function GameWindow() {
     let totalConsolations = requirements["consolation_prize_count"];
     let totalMain = requirements["main_prize_count"];
     let totalPrizes = totalConsolations + totalMain;
-    setIsGameRunning(true);
     if (isCompletelyFilled) {
       await window.api.gameCompletedDialog();
-      setIsGameRunning(false);
     }
     if (!isConsolationFilled) {
       await setBox(Array(totalPrizes).fill(""));
@@ -138,7 +165,6 @@ function GameWindow() {
         });
         if (countMainFilled === totalMain - 1) {
           setIsCompletelyFilled(true);
-          setIsGameRunning(false);
           await window.api.updatePrizesTable(finalNumbers);
           await window.api.updateCouponsTable(finalNumbers);
         }
@@ -159,7 +185,8 @@ function GameWindow() {
     }
     async function getBoxDistribution(totalPrizes, requirements) {
       let linesArray = [];
-      let remainder = requirements["consolation_prize_count"] % 10;
+      let numberOfBoxes = getNumberOfBoxes(window.screen.width);
+      let remainder = requirements["consolation_prize_count"] % numberOfBoxes;
       let currentIndex = 0;
       if (remainder > 0) {
         linesArray.push({
@@ -210,19 +237,22 @@ function GameWindow() {
         >
           <button
             type={"button"}
-            className={"cursor-pointer"}
+            className={
+              "cursor-pointer p-2 px-3 font-open font-semibold text-white text-xs rounded-md bg-neutral-700"
+            }
             onClick={() => {
-              !isGameRunning ? navigate("/settings") : "";
+              navigate("/settings");
             }}
-            disabled={isGameRunning}
           >
-            <IoSettingsSharp color={"black"} size={"1.2rem"} />
+            Go to Settings
           </button>
           <button
-            className={"p-1 rounded-md bg-red-700 cursor-pointer"}
-            onClick={handleClose}
+            className={
+              "p-1 rounded-md bg-red-700 cursor-pointer px-2 text-xs font-open font-semibold text-white"
+            }
+            onClick={handleLogout}
           >
-            <IoClose size={"1.2rem"} color={"white"} />
+            Logout
           </button>
           <button
             className={"p-1 rounded-md bg-yellow-500 cursor-pointer"}
@@ -248,7 +278,7 @@ function GameWindow() {
               "font-poppins text-[3rem] text-blue-600 tracking-wider font-extrabold uppercase"
             }
           >
-            🎉 {requirements["event_name"]} 🎉
+            {requirements["event_name"]}
           </h1>
         </section>
         <section
@@ -274,6 +304,13 @@ function GameWindow() {
             </button>
           </div>
         </section>
+        <p
+          className={
+            "font-bold text-center text-md font-poppins uppercase text-gray-500"
+          }
+        >
+          {isCompletelyFilled ? "Draw for all prizes has been over!" : ""}
+        </p>
         <section
           id={"main-prize-section"}
           className={
@@ -294,7 +331,7 @@ function GameWindow() {
         <section
           id={"consolation-prize-section"}
           className={
-            "mt-2 p-8 w-[95%] border-1 border-gray-300 rounded-xl min-h-[20%] flex flex-row flex-wrap justify-center items-start gap-5"
+            "mt-2 p-8 w-[95%] border-1 border-gray-300 rounded-xl min-h-[20%] flex flex-row flex-wrap justify-center items-start gap-3"
           }
         >
           <h2
@@ -309,7 +346,7 @@ function GameWindow() {
               <div
                 key={lineIndex}
                 className={
-                  "w-full flex flex-row justify-center items-center gap-8"
+                  "w-full flex flex-row justify-center items-center gap-5"
                 }
               >
                 {box

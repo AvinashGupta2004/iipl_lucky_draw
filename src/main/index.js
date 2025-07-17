@@ -1,9 +1,9 @@
 // noinspection JSUnresolvedReference,ExceptionCaughtLocallyJS
 
-import { app, shell, BrowserWindow, ipcMain, dialog } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
 import { join } from "path";
-import { electronApp, optimizer, is } from "@electron-toolkit/utils";
-import icon from "../../resources/indoramaicon.jpeg";
+import { electronApp, is, optimizer } from "@electron-toolkit/utils";
+import icon from "../../resources/favicon.ico";
 import { Worker } from "worker_threads";
 import workerPath from "./Controller?modulePath"; // This path should point to your Controller.js
 import excel from "exceljs";
@@ -19,6 +19,7 @@ let messageIdCounter = 0;
 const pendingWorkerMessages = new Map();
 
 let inventoryCouponNumbers = [];
+let problematicNumbers = [];
 
 if (is.dev) {
   databasePath = join(__dirname, "../../resources/app_data.db");
@@ -43,7 +44,6 @@ function setupWorkerThread() {
       dbPath: databasePath,
     },
   });
-  console.log(workerPath);
   workerInstance.on("message", (message) => {
     const { id, success, result, error } = message;
     if (pendingWorkerMessages.has(id)) {
@@ -68,10 +68,6 @@ function setupWorkerThread() {
   workerInstance.on("exit", (code) => {
     if (code !== 0) {
       console.error(`Worker stopped with exit code ${code}`);
-      dialog.showErrorBox(
-        "Worker Exit",
-        `Worker thread exited unexpectedly with code: ${code}`,
-      );
     }
   });
 }
@@ -83,11 +79,6 @@ function sendToWorker(method, ...args) {
     workerInstance.postMessage({ id, method, args });
   });
 }
-
-// The Controller class is now entirely managed by the worker.
-// We remove the local instance of Controller and replace direct calls
-// with calls to sendToWorker.
-// let database = new Controller(); // REMOVE THIS LINE
 
 function createWindow() {
   // Create the browser window.
@@ -230,7 +221,7 @@ app.whenReady().then(() => {
         dialog.showMessageBoxSync(mainWindow, {
           type: "error",
           title: "Error",
-          message: "Some error occurred and registration failed:",
+          message: "Some error occurred",
         });
         return false;
       }
@@ -244,7 +235,26 @@ app.whenReady().then(() => {
       return false;
     }
   });
-
+  function filterDates(logData, fromDateStr, toDateStr) {
+    // Convert all strings to Date objects for comparison
+    const fromDate = parseYYYYMMDD(fromDateStr);
+    const toDate = parseYYYYMMDD(toDateStr);
+    if (!fromDate && !toDate) return null;
+    return logData.filter((log) => {
+      const currentDate = parseDDMMYYYY(log.run_dt.split(" ")[0]);
+      return currentDate >= fromDate && currentDate <= toDate;
+    });
+  }
+  function parseYYYYMMDD(dateStr) {
+    if (dateStr === "") return null;
+    const [year, month, day] = dateStr.toString().split("-").map(Number);
+    return new Date(year, month - 1, day);
+  }
+  function parseDDMMYYYY(dateStr) {
+    if (dateStr === "") return null;
+    const [day, month, year] = dateStr.toString().split("-").map(Number);
+    return new Date(year, month - 1, day);
+  }
   ipcMain.handle("login-user", async (_, { userID, userPassword }) => {
     try {
       const userResult = await sendToWorker("getUser", userID);
@@ -264,17 +274,7 @@ app.whenReady().then(() => {
         }
 
         if (compareResult.result) {
-          dialog.showMessageBoxSync(mainWindow, {
-            type: "info",
-            title: "Welcome Admin",
-            message: `Welcome ${user.user_name}!. You are successfully logged in!`,
-            buttons: ["Ok"],
-          });
           loggedInUserInfo = user;
-          await sendToWorker("insertActivityLog", {
-            userID: loggedInUserInfo.userID,
-            actType: "Sign in",
-          });
           return true;
         } else {
           dialog.showMessageBoxSync(mainWindow, {
@@ -307,15 +307,6 @@ app.whenReady().then(() => {
     try {
       const result = await sendToWorker("updateRequirements", data);
       if (result.success) {
-        dialog.showMessageBoxSync(mainWindow, {
-          type: "info",
-          title: "Settings",
-          message: "Settings saved Successfully!",
-        });
-        await sendToWorker("insertActivityLog", {
-          userID: loggedInUserInfo.userID,
-          actType: "Changed Requirements",
-        });
         return true;
       } else {
         dialog.showMessageBoxSync(mainWindow, {
@@ -338,153 +329,89 @@ app.whenReady().then(() => {
 
   ipcMain.handle("load-coupon-inventory", async () => {
     try {
-      // Reload the database in the worker to ensure fresh connection
+      problematicNumbers = [];
       await sendToWorker("reloadDatabase");
-      let getCouponsResult = await sendToWorker("getCoupons");
-      if (!getCouponsResult.success) {
-        throw new Error(getCouponsResult.error);
-      }
-      if (getCouponsResult.data.length === 0) {
+      const requirementsResult = await sendToWorker("getRequirements");
+      if (!requirementsResult.success || !requirementsResult.data) {
         dialog.showMessageBoxSync(mainWindow, {
           type: "error",
-          title: "Empty Inventory",
+          title: "Configuration Error",
           message:
-            "Coupon Inventory is empty. Please fill it with Coupon Numbers",
+            "Please configure the requirements first before loading coupons",
         });
         return false;
-      }
-      inventoryCouponNumbers = await getCouponsResult.data;
-
-      const requirementsResult = await sendToWorker("getRequirements");
-      if (!requirementsResult.success) {
-        dialog.showMessageBoxSync(mainWindow, {
-          type: "error",
-          title: "Error",
-          message: `Failed to retrieve requirements: ${requirementsResult.error}`,
-        });
-        return false; // Stop if requirements cannot be fetched
       }
       const requirements = requirementsResult.data;
-
-      if (!requirements) {
-        dialog.showMessageBoxSync(mainWindow, {
-          type: "error",
-          title: "Error",
-          message: "Requirements not set. Please configure requirements first.",
-        });
-        return false; // Stop if requirements are not set
-      }
-      const checkPrizesResult = await sendToWorker(
+      const prizeCheckResult = await sendToWorker(
         "checkPrizeNumbersAlongCoupons",
       );
-      if (!checkPrizesResult.success) {
-        dialog.showMessageBoxSync(mainWindow, {
-          type: "error",
-          title: "Error",
-          message: `Failed to check existing prizes: ${checkPrizesResult.error}`,
-        });
-        return false; // Stop if prize check fails
+      if (!prizeCheckResult.success) {
+        throw new Error(prizeCheckResult.error);
       }
-      const arePrizesClear = checkPrizesResult.data;
-
-      if (!arePrizesClear) {
-        let response = dialog.showMessageBoxSync(mainWindow, {
+      if (!prizeCheckResult.data) {
+        const response = dialog.showMessageBoxSync(mainWindow, {
           type: "warning",
-          title: "New Session",
+          title: "Existing Data Found",
           message:
-            "Some draw prizes already found in data source. This operation will remove all previous data stored in the data source. Continue?",
-          buttons: ["Yes", "No"],
+            "Previous draw data exists. Loading new coupons will clear all existing data. Continue?",
+          buttons: ["Continue", "Cancel"],
           defaultId: 1,
-          cancelId: 1,
         });
-        if (response === 0) {
-          // User clicked Yes, clear prizes and coupons
-          const clearCouponsRes = await sendToWorker("clearCoupons");
-          if (!clearCouponsRes.success) {
-            dialog.showMessageBoxSync(mainWindow, {
-              type: "error",
-              title: "Clear Data Error",
-              message: `Failed to clear previous data. Prizes: Coupons: ${clearCouponsRes.error || "N/A"}`,
-            });
-            return false; // Stop if clearing fails
-          }
-          dialog.showMessageBoxSync(mainWindow, {
-            type: "info",
-            title: "Data Cleared",
-            message: "Previous coupon data has been cleared.",
-          });
-        } else {
-          return false; // User clicked No, prevent loading
-        }
-      }
-      // now the prizes have been cleared, it's time to reload the database again... so that new data can come
-      await sendToWorker("reloadDatabase");
 
-      getCouponsResult = await sendToWorker("getCoupons");
-      if (!getCouponsResult.success) {
-        throw new Error(getCouponsResult.error);
+        if (response !== 0) return false; // User cancelled
+
+        const clearResult = await sendToWorker("clearCoupons");
+        if (!clearResult.success) {
+          throw new Error("Failed to clear existing data");
+        }
+        // Reload after clearing
+        await sendToWorker("reloadDatabase");
       }
-      if (getCouponsResult.data.length === 0) {
+      const couponsResult = await sendToWorker("getCoupons");
+      if (!couponsResult.success) {
+        throw new Error(couponsResult.error);
+      }
+      if (couponsResult.data.length === 0) {
         dialog.showMessageBoxSync(mainWindow, {
           type: "error",
           title: "Empty Inventory",
-          message:
-            "Coupon Inventory is empty. Please fill it with Coupon Numbers",
+          message: "No coupon numbers found in the database",
         });
         return false;
       }
-      inventoryCouponNumbers = await getCouponsResult.data;
-
-      let FLAG = true;
-      let problematicNumbers = [];
-
-      // Ensure requirements are loaded before proceeding with validation
-      if (!requirements) {
+      inventoryCouponNumbers = couponsResult.data;
+      const invalidCoupons = inventoryCouponNumbers.filter(
+        ({ Coupon_Numbers }) => {
+          const value = Coupon_Numbers;
+          return (
+            isNaN(value) ||
+            value < requirements.min_range ||
+            value > requirements.max_range ||
+            String(value).length > requirements.total_digits
+          );
+        },
+      );
+      if (invalidCoupons.length > 0) {
+        problematicNumbers = invalidCoupons.map((c) => c.Coupon_Numbers);
         dialog.showMessageBoxSync(mainWindow, {
           type: "error",
-          title: "Error",
-          message: "Requirements not set. Please configure requirements first.",
+          title: "Validation Failed",
+          message: `${invalidCoupons.length} coupon numbers don't meet requirements`,
         });
         return false;
       }
 
-      inventoryCouponNumbers.map(({ Coupon_Numbers }) => {
-        let value = Coupon_Numbers;
-        if (
-          isNaN(value) ||
-          !value ||
-          !(value >= requirements["min_range"]) ||
-          !(value <= requirements["max_range"]) ||
-          !(String(value).length <= requirements.total_digits)
-        ) {
-          FLAG = false;
-          problematicNumbers.push(value);
-        }
-      });
-      if (FLAG) {
-        dialog.showMessageBoxSync(mainWindow, {
-          type: "info",
-          title: "Coupon Inventory",
-          message: "Coupon Inventory loaded Successfully!",
-        });
-        return true;
-      } else {
-        dialog.showMessageBoxSync(mainWindow, {
-          type: "error",
-          title: "Error",
-          message:
-            "Coupon Numbers didn't met the expected requirements as specified!",
-          detail: "Cannot add Numbers : " + String(problematicNumbers),
-        });
-        return false;
-      }
-    } catch (err) {
-      console.error(err); // Use console.error for errors
+      return true;
+    } catch (error) {
+      console.error("Coupon load error:", error);
+
       dialog.showMessageBoxSync(mainWindow, {
         type: "error",
-        title: "Error",
-        message: `An error occurred while loading coupons: ${err.message}`,
+        title: "Loading Failed",
+        message: "Could not load coupon inventory",
+        detail: error.message,
       });
+
       return false;
     }
   });
@@ -548,7 +475,7 @@ app.whenReady().then(() => {
           title: "Operation not allowed",
           message:
             "Coupon Numbers provided in data source are not sufficient as per Requirements.",
-          detail: `Total Prizes: ${totalPrizes} \nNumbers in data source: ${inventoryCouponNumbers.length}`,
+          detail: `Total Prizes in requirements: ${totalPrizes} \nNumbers in data source: ${inventoryCouponNumbers.length}`,
         });
         return false;
       } else {
@@ -597,7 +524,7 @@ app.whenReady().then(() => {
     dialog.showMessageBoxSync(mainWindow, {
       type: "info",
       title: "Operation Complete",
-      message: "This game is completed. Thank You.",
+      message: "Draw for all prizes has been over !!",
     });
   });
 
@@ -683,35 +610,72 @@ app.whenReady().then(() => {
   });
 
   ipcMain.handle("load-from-excel", async () => {
-    let workbook = new excel.Workbook();
-    let buffer = fs.readFileSync(workbookPath);
-    await workbook.xlsx.load(buffer);
-    let worksheet = workbook.getWorksheet("Coupons");
-    if (worksheet.actualRowCount === 0) {
+    try {
+      if (!fs.existsSync(workbookPath)) {
+        return { success: false, message: "Excel file not found" };
+      }
+
+      let workbook = new excel.Workbook();
+      let buffer = fs.readFileSync(workbookPath);
+      await workbook.xlsx.load(buffer);
+      let worksheet = workbook.worksheets[0];
+      if (!worksheet || worksheet.actualRowCount <= 1) {
+        dialog.showMessageBoxSync(mainWindow, {
+          type: "error",
+          title: "Excel Sheet Error",
+          message:
+            "Either Excel Sheet is empty or it is not loaded properly. Please check the Excel Sheet conditions as specified and try again!",
+        });
+        return { success: false, message: "Empty worksheet" };
+      }
+
+      let requirements = await sendToWorker("getRequirements");
+      if (!requirements.success) {
+        return { success: false, message: "Failed to get requirements" };
+      }
+
+      let loadedCouponNumbers = [];
+      worksheet.eachRow({ includeEmpty: false }, (row, rowIndex) => {
+        if (rowIndex !== 1) {
+          // row.eachCell((cell, colNumber) => {
+          //   if (cell.value && colNumber === 0) {
+          //     loadedCouponNumbers.push(
+          //       cell.value
+          //         .toString()
+          //         .padStart(requirements.data.total_digits, "0"),
+          //     );
+          //   }
+          // });
+          const cellValue = row.getCell(1).value;
+          if (cellValue !== null && cellValue !== undefined) {
+            loadedCouponNumbers.push(
+              cellValue.toString().padStart(requirements.total_digits, "0"),
+            );
+          }
+        }
+      });
+
+      if (loadedCouponNumbers.length === 0) {
+        return { success: false, message: "No valid coupon numbers found" };
+      }
+
+      const insertResult = await sendToWorker(
+        "insertCoupons",
+        loadedCouponNumbers,
+      );
+      if (!insertResult.success) {
+        return { success: false, message: insertResult.error };
+      }
+      return { success: true, count: loadedCouponNumbers.length };
+    } catch (err) {
+      console.error("Error loading from excel:", err);
       dialog.showMessageBoxSync(mainWindow, {
         type: "error",
-        title: "Coupon Inventory is Empty!",
-        message:
-          "Coupon Inventory excel sheet is empty. Please add some coupon numbers.",
+        title: "Error",
+        message: `Failed to load from excel: ${err.message}`,
       });
+      return { success: false, message: err.message };
     }
-    let requirements = await sendToWorker("getRequirements");
-    let loadedCouponNumbers = [];
-    worksheet.eachRow((row, rowIndex) => {
-      if (rowIndex !== 1) {
-        row.eachCell((cell) => {
-          loadedCouponNumbers.push(
-            cell.value.toString().padStart(requirements.total_digits, "0"),
-          );
-        });
-      }
-    });
-    await sendToWorker("insertCoupons", loadedCouponNumbers);
-    dialog.showMessageBoxSync(mainWindow, {
-      type: "info",
-      title: "Success",
-      message: "Coupon Numbers loaded into the database Successfully!",
-    });
   });
 
   ipcMain.handle("open-excel-file", async () => {
@@ -720,27 +684,52 @@ app.whenReady().then(() => {
 
   ipcMain.handle("browse-excel", async () => {
     try {
-      let filePath = dialog.showOpenDialogSync(mainWindow);
-      fs.copyFileSync(filePath[0], workbookPath);
-      dialog.showMessageBoxSync(mainWindow, {
-        type: "info",
-        title: "Success",
-        message: "File was loaded Successfully! Now click Reload Inventory",
+      let filePath = dialog.showOpenDialogSync(mainWindow, {
+        properties: ["openFile"],
+        filters: [
+          { name: "Excel Files", extensions: ["xlsx"] },
+          { name: "All Files", extensions: ["*"] },
+        ],
       });
+
+      if (!filePath || filePath.length === 0) {
+        return { success: false, message: "No file selected" };
+      }
+
+      fs.copyFileSync(filePath[0], workbookPath);
+      return { success: true, message: "Excel file loaded successfully" };
     } catch (err) {
+      console.error("Error browsing excel:", err);
       dialog.showErrorBox(
-        "File is Busy",
-        "Looks like the file you selected is open! Kindly close the file and try again!",
+        "Can't load the Excel File",
+        "Couldn't copy the excel file. Either the selected file is not loaded properly or is Open in another program.",
       );
-      console.log(err);
+      return { success: false, message: err.message };
     }
   });
-  ipcMain.handle("get-activity-log", async () => {
-    let resultArray = await sendToWorker("getActivityLog", loggedInUserInfo.userID);
-    return resultArray;
+  ipcMain.handle("get-draw-run-log", async () => {
+    return await sendToWorker("getDrawRunLog", loggedInUserInfo);
   });
   ipcMain.handle("coupon-count", () => {
-    return inventoryCouponNumbers.length;
+    return problematicNumbers.length > 0 ? 0 : inventoryCouponNumbers.length;
+  });
+  ipcMain.handle("get-filtered-logs", async (_, data) => {
+    try {
+      let logs = await sendToWorker("getDrawRunLog", loggedInUserInfo);
+      return filterDates(logs, data.fromDate, data.toDate);
+    } catch (err) {
+      console.error(err);
+      return null;
+    }
+  });
+
+  ipcMain.handle("error-dialog", (_, error, totalPrizes, couponCount) => {
+    dialog.showMessageBoxSync(mainWindow, {
+      type: "error",
+      title: "Error",
+      message: error,
+      detail: `Total Prizes in requirements: ${totalPrizes}\nTotal Coupon Numbers loaded: ${couponCount}`,
+    });
   });
 });
 

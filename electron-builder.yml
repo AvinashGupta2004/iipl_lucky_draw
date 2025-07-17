@@ -12,14 +12,17 @@ asarUnpack:
   - resources/**
 win:
   executableName: "Indorama Lucky Draw"
+  icon: "./resources/favicon.ico"
 nsis:
-  artifactName: ${name}-setup.${ext}
+  artifactName: ${name}-setup-excel.${ext}
   shortcutName: ${productName}
   uninstallDisplayName: ${productName}
   createDesktopShortcut: always
   oneClick : false
   allowToChangeInstallationDirectory: true
   deleteAppDataOnUninstall: true
+  installerHeaderIcon: "./resources/favicon.ico"
+  installerIcon: "./resources/favicon.ico"
 mac:
   entitlementsInherit: build/entitlements.mac.plist
   extendInfo:

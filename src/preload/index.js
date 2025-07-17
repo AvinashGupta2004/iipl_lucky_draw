@@ -14,7 +14,7 @@ const api = {
     return await ipcRenderer.invoke("login-user", data);
   },
   saveSettings: async (data) => {
-    await ipcRenderer.invoke("update-requirements", data);
+    return await ipcRenderer.invoke("update-requirements", data);
   },
   loadCouponInventory: async () => {
     return await ipcRenderer.invoke("load-coupon-inventory");
@@ -23,7 +23,10 @@ const api = {
     return await ipcRenderer.invoke("get-requirements");
   },
   getActivityLog: async () => {
-    return await ipcRenderer.invoke("get-activity-log");
+    return await ipcRenderer.invoke("get-draw-run-log");
+  },
+  getFilteredActivityLog: async (data) => {
+    return await ipcRenderer.invoke("get-filtered-logs", data);
   },
   alertFalseIntegrity: async () => {
     await ipcRenderer.invoke("alert-false-integrity");
@@ -50,14 +53,17 @@ const api = {
     await ipcRenderer.invoke("open-excel-file");
   },
   loadExcelFile: async () => {
-    await ipcRenderer.invoke("load-from-excel");
+    return await ipcRenderer.invoke("load-from-excel");
   },
   browseExcelFile: async () => {
-    await ipcRenderer.invoke("browse-excel");
+    return await ipcRenderer.invoke("browse-excel");
   },
   couponCount: async () => {
     return await ipcRenderer.invoke("coupon-count");
-  }
+  },
+  errorDialog: async (error,totalPrizes,couponCount) => {
+    await ipcRenderer.invoke("error-dialog", error, totalPrizes, couponCount);
+  },
 };
 const electronStoreAPIs = {
   get: async (key) => {
