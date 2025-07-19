@@ -15,12 +15,14 @@ function GameWindow() {
   const [box, setBox] = useState([]);
   const [rollingNumber, setRollingNumber] = useState(["1", "2", "5", "4", "7"]);
   const [isNumberGenerated, setIsNumberGenerated] = useState(true);
-  const [lines, setLines] = useState([]);
+  const [mainLines, setMainLines] = useState([]);
+  const [consolationLines, setConsolationLines] = useState([]);
   const navigate = useNavigate();
+  const [imageDirectoryPath, setImageDirectoryPath] = useState("");
   const screenSizes = {
     840: 6,
     1024: 8,
-    1900:10,
+    1900: 10,
   };
 
   function getNumberOfBoxes(screenWidth) {
@@ -65,6 +67,7 @@ function GameWindow() {
       </div>
     );
   }
+
   function NumberBox({
     // eslint-disable-next-line react/prop-types
     value,
@@ -100,6 +103,7 @@ function GameWindow() {
       </div>
     );
   }
+
   async function startRoll(final_num = "8157") {
     setIsNumberGenerated(false);
     return new Promise((resolve) => {
@@ -111,13 +115,6 @@ function GameWindow() {
               .toString()
               .padStart(requirements.total_digits, "0"),
           ];
-          // rollingNumber.map((_, index) => {
-          //   setRollingNumber((prev) => {
-          //     const newArray = [...prev];
-          //     newArray =
-          //     return newArray;
-          //   });
-          // });
           setRollingNumber(new_rolled_number_array);
           rolls++;
         } else {
@@ -173,7 +170,36 @@ function GameWindow() {
       }
     }
   }
+
+  function getBoxDistribution(count, requirements) {
+    let linesArray = [];
+    let numberOfBoxes = getNumberOfBoxes(window.screen.width);
+    let remainder = count % numberOfBoxes;
+    let currentIndex = 0;
+
+    if (remainder > 0) {
+      linesArray.push({
+        startIndex: currentIndex,
+        count: remainder,
+      });
+      currentIndex += remainder;
+    }
+
+    while (currentIndex < count) {
+      linesArray.push({
+        startIndex: currentIndex,
+        count: numberOfBoxes,
+      });
+      currentIndex += numberOfBoxes;
+    }
+
+    return linesArray;
+  }
+
   useEffect(() => {
+    window.api.loadImageDirectoryPath().then((result)=>{
+      setImageDirectoryPath(result);
+    })
     async function fetchFinalNumbers() {
       setIsWindowLoaded(false);
       return await window.api.getFinalNumbers();
@@ -183,33 +209,27 @@ function GameWindow() {
       setIsWindowLoaded(false);
       return await window.api.getRequirements();
     }
-    async function getBoxDistribution(totalPrizes, requirements) {
-      let linesArray = [];
-      let numberOfBoxes = getNumberOfBoxes(window.screen.width);
-      let remainder = requirements["consolation_prize_count"] % numberOfBoxes;
-      let currentIndex = 0;
-      if (remainder > 0) {
-        linesArray.push({
-          startIndex: currentIndex,
-          count: remainder,
-        });
-        currentIndex += remainder;
-      }
-      while (currentIndex < totalPrizes) {
-        linesArray.push({
-          startIndex: currentIndex,
-          count: 10,
-        });
-        currentIndex += 10;
-      }
-      await setLines(linesArray);
-    }
+
     fetchRequirements()
       .then(async (result) => {
         setRequirements(result);
         const totalPrizes =
           result["main_prize_count"] + result["consolation_prize_count"];
-        await getBoxDistribution(totalPrizes, result);
+
+        // Generate lines for main prizes
+        const mainLines = getBoxDistribution(
+          result["main_prize_count"],
+          result,
+        );
+        setMainLines(mainLines);
+
+        // Generate lines for consolation prizes
+        const consolationLines = getBoxDistribution(
+          result["consolation_prize_count"],
+          result,
+        );
+        setConsolationLines(consolationLines);
+
         setBox(Array(totalPrizes).fill(""));
         setRollingNumber(Array(result["total_digits"]).fill("0"));
         setIsWindowLoaded(true);
@@ -230,6 +250,7 @@ function GameWindow() {
           "w-screen h-screen flex flex-col items-center p-5 gap-5 relative bg-amber-50/30"
         }
       >
+        {/* Header and controls remain the same */}
         <div
           className={
             "absolute right-3 w-full h-2 flex flex-row justify-end items-center gap-1"
@@ -238,7 +259,7 @@ function GameWindow() {
           <button
             type={"button"}
             className={
-              "cursor-pointer p-2 px-3 font-open font-semibold text-white text-xs rounded-md bg-neutral-700"
+              "cursor-pointer p-1.5 px-3 font-open font-semibold text-white text-xs rounded-md bg-neutral-700"
             }
             onClick={() => {
               navigate("/settings");
@@ -248,19 +269,21 @@ function GameWindow() {
           </button>
           <button
             className={
-              "p-1 rounded-md bg-red-700 cursor-pointer px-2 text-xs font-open font-semibold text-white"
+              "p-1.5 rounded-md bg-red-700 cursor-pointer px-2 text-xs font-open font-semibold text-white"
             }
             onClick={handleLogout}
           >
             Logout
           </button>
           <button
-            className={"p-1 rounded-md bg-yellow-500 cursor-pointer"}
+            className={"p-1.5 rounded-md bg-yellow-500 cursor-pointer"}
             onClick={handleMinimize}
           >
-            <MdMinimize size={"1.2rem"} color={"black"} />
+            <MdMinimize size={"1rem"} color={"black"} />
           </button>
         </div>
+
+        {/* Title section remains the same */}
         <section
           className={
             "p-5 rounded-2xl flex flex-col items-center justify-center gap-2"
@@ -275,12 +298,16 @@ function GameWindow() {
           </h1>
           <h1
             className={
-              "font-poppins text-[3rem] text-blue-600 tracking-wider font-extrabold uppercase"
+              "h-[3rem] font-poppins text-[3rem] text-blue-600 tracking-wider font-extrabold uppercase flex flex-row justify-center items-center gap-8"
             }
           >
+            <img src={imageDirectoryPath+"/image-left.png"} className={"object-contain h-16"} />
             {requirements["event_name"]}
+            <img src={imageDirectoryPath+"/image-right.png"} className={"object-contain h-16"} />
           </h1>
         </section>
+
+        {/* Number generator section remains the same */}
         <section
           id={"numberGenerator"}
           className={"w-full flex flex-row gap-6"}
@@ -296,7 +323,7 @@ function GameWindow() {
                 isNumberGenerated ? await systemProcess() : "";
               }}
               className={
-                "h-10 px-4 p-2 bg-green-500 font-bold font-open text-white text-md uppercase rounded-full cursor-pointer hover:bg-green-700 flex flex-row justify-center items-center gap-2"
+                "h-10 px-4 p-2 bg-green-500 font-bold font-open text-white text-md uppercase rounded-full cursor-pointer hover:bg-green-700 flex flex-row justify-center items-center gap-2 transition-all duration-200"
               }
             >
               <CiGift size={"1.5rem"} color={"white"} /> Prize No.
@@ -304,6 +331,7 @@ function GameWindow() {
             </button>
           </div>
         </section>
+
         <p
           className={
             "font-bold text-center text-md font-poppins uppercase text-gray-500"
@@ -311,64 +339,81 @@ function GameWindow() {
         >
           {isCompletelyFilled ? "Draw for all prizes has been over!" : ""}
         </p>
+
+        {/* Main prize section with line-based layout */}
         <section
           id={"main-prize-section"}
           className={
-            "w-[95%] p-12 border-1 border-gray-300 rounded-xl flex flex-row flex-wrap justify-center items-start gap-y-1 gap-x-6"
-          }
-        >
-          {box.slice(0, requirements["main_prize_count"]).map((data, index) => {
-            return (
-              <NumberBox
-                value={box[index]}
-                type={"main-prize"}
-                title={`${index + 1}`}
-                key={index}
-              />
-            );
-          })}
-        </section>
-        <section
-          id={"consolation-prize-section"}
-          className={
-            "mt-2 p-8 w-[95%] border-1 border-gray-300 rounded-xl min-h-[20%] flex flex-row flex-wrap justify-center items-start gap-3"
+            "w-[95%] p-3 border-1 border-gray-300 rounded-xl flex flex-col justify-center items-start gap-y-1"
           }
         >
           <h2
             className={
-              "w-full font-bold text-left text-lg font-poppins uppercase text-orange-900"
+              "w-full font-bold text-left text-lg font-poppins uppercase text-blue-900"
+            }
+          ></h2>
+          {mainLines.map((line, lineIndex) => (
+            <div
+              key={`main-${lineIndex}`}
+              className={
+                "w-full flex flex-row justify-center items-center gap-5 mb-4"
+              }
+            >
+              {box
+                .slice(line.startIndex, line.startIndex + line.count)
+                .map((value, index) => (
+                  <NumberBox
+                    value={value}
+                    type={"main-prize"}
+                    title={`${line.startIndex + index + 1}`}
+                    key={`main-${line.startIndex + index}`}
+                    index={line.startIndex + index}
+                  />
+                ))}
+            </div>
+          ))}
+        </section>
+
+        {/* Consolation prize section with line-based layout */}
+        <section
+          id={"consolation-prize-section"}
+          className={
+            "p-5 w-[95%] border-1 border-gray-300 rounded-xl min-h-[20%] flex flex-col justify-center items-start gap-3"
+          }
+        >
+          <h2
+            className={
+              "p-1 w-full font-bold text-left text-lg font-poppins uppercase text-orange-900"
             }
           >
-            Other Attractions:{" "}
+            Other Attractions:
           </h2>
-          {lines.map((line, lineIndex) => {
-            return (
-              <div
-                key={lineIndex}
-                className={
-                  "w-full flex flex-row justify-center items-center gap-5"
-                }
-              >
-                {box
-                  .slice(
-                    line.startIndex + requirements["main_prize_count"],
-                    line.startIndex +
-                      line.count +
-                      requirements["main_prize_count"],
-                  )
-                  .map((value, index) => {
-                    return (
-                      <NumberBox
-                        value={value}
-                        key={index + requirements["main_prize_count"]}
-                        type={"consolation-prize"}
-                        index={index + requirements["main_prize_count"]}
-                      />
-                    );
-                  })}
-              </div>
-            );
-          })}
+          {consolationLines.map((line, lineIndex) => (
+            <div
+              key={`consolation-${lineIndex}`}
+              className={
+                "p-1 w-full flex flex-row justify-center items-center gap-5"
+              }
+            >
+              {box
+                .slice(
+                  line.startIndex + requirements["main_prize_count"],
+                  line.startIndex +
+                    line.count +
+                    requirements["main_prize_count"],
+                )
+                .map((value, index) => (
+                  <NumberBox
+                    value={value}
+                    type={"consolation-prize"}
+                    key={`consolation-${line.startIndex + index}`}
+                    index={
+                      line.startIndex + index + requirements["main_prize_count"]
+                    }
+                  />
+                ))}
+            </div>
+          ))}
         </section>
       </main>
     );

@@ -61,9 +61,18 @@ const api = {
   couponCount: async () => {
     return await ipcRenderer.invoke("coupon-count");
   },
-  errorDialog: async (error,totalPrizes,couponCount) => {
+  errorDialog: async (error, totalPrizes, couponCount) => {
     await ipcRenderer.invoke("error-dialog", error, totalPrizes, couponCount);
   },
+  loadImageDirectoryPath: async () => {
+    return await ipcRenderer.invoke("get-image-directory-path");
+  },
+  selectLeftImage: async () => {
+    await ipcRenderer.invoke("select-left-image");
+  },
+  selectRightImage: async () => {
+    await ipcRenderer.invoke("select-right-image");
+  }
 };
 const electronStoreAPIs = {
   get: async (key) => {

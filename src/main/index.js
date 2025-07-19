@@ -1,18 +1,20 @@
 // noinspection JSUnresolvedReference,ExceptionCaughtLocallyJS
 
 import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
-import { join } from "path";
+import { join, extname } from "path";
 import { electronApp, is, optimizer } from "@electron-toolkit/utils";
 import icon from "../../resources/favicon.ico";
 import { Worker } from "worker_threads";
 import workerPath from "./Controller?modulePath"; // This path should point to your Controller.js
 import excel from "exceljs";
 import fs from "fs";
+import crypto from "crypto";
 
 let mainWindow = null;
 let databasePath = null;
 let workerInstance = null;
 let workbookPath = null;
+let gameWindowImageDirectoryPath = null;
 let loggedInUserInfo = null;
 
 let messageIdCounter = 0;
@@ -24,6 +26,7 @@ let problematicNumbers = [];
 if (is.dev) {
   databasePath = join(__dirname, "../../resources/app_data.db");
   workbookPath = join(__dirname, "../../resources/couponInventory.xlsx");
+  gameWindowImageDirectoryPath = join(__dirname, "../../resources");
 } else {
   databasePath = join(
     process.resourcesPath,
@@ -36,6 +39,11 @@ if (is.dev) {
     "app.asar.unpacked",
     "resources",
     "couponInventory.xlsx",
+  );
+  gameWindowImageDirectoryPath = join(
+    process.resourcesPath,
+    "app.asar.unpacked",
+    "resources",
   );
 }
 function setupWorkerThread() {
@@ -92,6 +100,8 @@ function createWindow() {
     webPreferences: {
       preload: join(__dirname, "../preload/index.js"),
       sandbox: false,
+      webSecurity: false,
+      allowFileAccess: true,
       contentSecurityPolicy: `
         default-src 'self';
         script-src 'self';
@@ -120,9 +130,74 @@ function createWindow() {
   }
 }
 
+// async function generateFinalNumberJSON() {
+//   let mainPrizeNumbers = new Set();
+//   let consolationPrizeNumbers = new Set();
+//   const requirementsResult = await sendToWorker("getRequirements");
+//   if (!requirementsResult.success) {
+//     throw new Error(requirementsResult.error);
+//   }
+//   let requirements = requirementsResult.data;
+//
+//   let mainPrizes = requirements.main_prize_count;
+//   let consPrizes = requirements.consolation_prize_count;
+//
+//   while (mainPrizeNumbers.size < mainPrizes) {
+//     const index = Math.floor(Math.random() * inventoryCouponNumbers.length);
+//     mainPrizeNumbers.add(
+//       inventoryCouponNumbers[index].Coupon_Numbers.toString().padStart(
+//         requirements.total_digits,
+//         "0",
+//       ),
+//     );
+//   }
+//   while (consolationPrizeNumbers.size < consPrizes) {
+//     const index = Math.floor(Math.random() * inventoryCouponNumbers.length);
+//     if (
+//       !mainPrizeNumbers.has(
+//         inventoryCouponNumbers[index].Coupon_Numbers.toString().padStart(
+//           requirements.total_digits,
+//           "0",
+//         ),
+//       )
+//     ) {
+//       consolationPrizeNumbers.add(
+//         inventoryCouponNumbers[index].Coupon_Numbers.toString().padStart(
+//           requirements.total_digits,
+//           "0",
+//         ),
+//       );
+//     }
+//   }
+//   return {
+//     mainPrizeNumbers: [...mainPrizeNumbers],
+//     consolationPrizeNumbers: [...consolationPrizeNumbers],
+//   };
+// }
+function secureRandomInt(min, max) {
+  const range = max - min + 1;
+  const numBytes = Math.ceil(Math.log2(range) / 8);
+  const maxVal = Math.pow(256, numBytes);
+  let randomNumber;
+  do {
+    const buffer = crypto.randomFillSync(Buffer.alloc(numBytes));
+    randomNumber = 0;
+    for (let i = 0; i < numBytes; i++) {
+      randomNumber = (randomNumber << 8) | buffer[i];
+    }
+  } while (randomNumber >= maxVal - (maxVal % range)); // Ensure uniform distribution
+  return min + (randomNumber % range);
+}
+function secureShuffleArray(array) {
+  const newArray = [...array]; // Create a copy to avoid modifying the original
+  for (let i = newArray.length - 1; i > 0; i--) {
+    const j = secureRandomInt(0, i); // Use secure random for index
+    [newArray[i], newArray[j]] = [newArray[j], newArray[i]]; // Swap elements
+  }
+  return newArray;
+}
+
 async function generateFinalNumberJSON() {
-  let mainPrizeNumbers = new Set();
-  let consolationPrizeNumbers = new Set();
   const requirementsResult = await sendToWorker("getRequirements");
   if (!requirementsResult.success) {
     throw new Error(requirementsResult.error);
@@ -131,40 +206,42 @@ async function generateFinalNumberJSON() {
 
   let mainPrizes = requirements.main_prize_count;
   let consPrizes = requirements.consolation_prize_count;
+  const shuffledCoupons = secureShuffleArray(inventoryCouponNumbers);
 
-  while (mainPrizeNumbers.size < mainPrizes) {
-    const index = Math.floor(Math.random() * inventoryCouponNumbers.length);
-    mainPrizeNumbers.add(
-      inventoryCouponNumbers[index].Coupon_Numbers.toString().padStart(
-        requirements.total_digits,
-        "0",
-      ),
-    );
-  }
-  while (consolationPrizeNumbers.size < consPrizes) {
-    const index = Math.floor(Math.random() * inventoryCouponNumbers.length);
-    if (
-      !mainPrizeNumbers.has(
-        inventoryCouponNumbers[index].Coupon_Numbers.toString().padStart(
-          requirements.total_digits,
-          "0",
-        ),
-      )
-    ) {
-      consolationPrizeNumbers.add(
-        inventoryCouponNumbers[index].Coupon_Numbers.toString().padStart(
+  let mainPrizeNumbers = [];
+  let consolationPrizeNumbers = [];
+  for (let i = 0; i < mainPrizes; i++) {
+    if (i < shuffledCoupons.length) {
+      mainPrizeNumbers.push(
+        shuffledCoupons[i].Coupon_Numbers.toString().padStart(
           requirements.total_digits,
           "0",
         ),
       );
+    } else {
+      console.warn("Not enough coupons for all main prizes after shuffle.");
+      break;
     }
   }
+  for (let i = mainPrizes; i < mainPrizes + consPrizes; i++) {
+    if (i < shuffledCoupons.length) {
+      consolationPrizeNumbers.push(
+        shuffledCoupons[i].Coupon_Numbers.toString().padStart(
+          requirements.total_digits,
+          "0",
+        ),
+      );
+    } else {
+      console.warn("Not enough coupons for all consolation prizes after shuffle.");
+      break;
+    }
+  }
+
   return {
-    mainPrizeNumbers: [...mainPrizeNumbers],
-    consolationPrizeNumbers: [...consolationPrizeNumbers],
+    mainPrizeNumbers: mainPrizeNumbers,
+    consolationPrizeNumbers: consolationPrizeNumbers,
   };
 }
-
 app.whenReady().then(() => {
   // Set app user model id for windows
   setupWorkerThread();
@@ -541,6 +618,7 @@ app.whenReady().then(() => {
       if (recordedEventNames.includes(requirements.event_name)) {
         await sendToWorker("clearPrizesForEventName", requirements.event_name);
       }
+
       for (const [index, value] of finalNumbers.mainPrizeNumbers.entries()) {
         await sendToWorker(
           "insertFinalNumbers",
@@ -730,6 +808,56 @@ app.whenReady().then(() => {
       message: error,
       detail: `Total Prizes in requirements: ${totalPrizes}\nTotal Coupon Numbers loaded: ${couponCount}`,
     });
+  });
+
+  ipcMain.handle("get-image-directory-path", () => {
+    return gameWindowImageDirectoryPath;
+  });
+
+  ipcMain.handle("select-left-image", () => {
+    try {
+      let filePath = dialog.showOpenDialogSync(mainWindow, {
+        filters: { extensions: [".png", ".jpg", ".bmp", "*"] },
+      });
+      fs.copyFileSync(
+        filePath[0],
+        join(gameWindowImageDirectoryPath, "image-left.png"),
+      );
+      dialog.showMessageBoxSync(mainWindow, {
+        type: "info",
+        title: "Success",
+        message: "Image uploaded Successfully!",
+      });
+    } catch (err) {
+      dialog.showErrorBox(
+        "Error",
+        "Failed to upload Image due to an error:" + err.message,
+      );
+    }
+  });
+  ipcMain.handle("select-right-image", () => {
+    try {
+      let filePath = dialog.showOpenDialogSync(mainWindow, {
+        filters: { extensions: [".png", ".jpg", ".bmp", "*"] },
+      });
+      fs.copyFileSync(
+        filePath[0],
+        join(
+          gameWindowImageDirectoryPath,
+          "image-right.png",
+        ),
+      );
+      dialog.showMessageBoxSync(mainWindow, {
+        type: "info",
+        title: "Success",
+        message: "Image uploaded Successfully!",
+      });
+    } catch (err) {
+      dialog.showErrorBox(
+        "Error",
+        "Failed to upload Image due to an error:" + err.message,
+      );
+    }
   });
 });
 

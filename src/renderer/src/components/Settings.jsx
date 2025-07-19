@@ -592,6 +592,28 @@ function Settings() {
               >
                 Open Activity Logs
               </button>
+              <button
+                type={"button"}
+                onClick={async () => {
+                  await window.api.selectLeftImage();
+                }}
+                className={
+                  "w-full p-2.5 font-open font-semibold text-sm border-2 border-gray-300 rounded-lg flex flex-row justify-center items-center gap-2 cursor-pointer hover:bg-gray-50 hover:border-gray-400 transition-all duration-200"
+                }
+              >
+                Select Left Image
+              </button>
+              <button
+                type={"button"}
+                onClick={async () => {
+                  await window.api.selectRightImage();
+                }}
+                className={
+                  "w-full p-2.5 font-open font-semibold text-sm border-2 border-gray-300 rounded-lg flex flex-row justify-center items-center gap-2 cursor-pointer hover:bg-gray-50 hover:border-gray-400 transition-all duration-200"
+                }
+              >
+                Select Right Image
+              </button>
             </section>
           </section>
         </section>
